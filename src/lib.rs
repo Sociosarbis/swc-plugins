@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use swc_core::common::util::take::Take;
 use swc_core::common::Span;
-use swc_core::ecma::ast::ImportNamedSpecifier;
+use swc_core::ecma::ast::{ImportNamedSpecifier, JSXExpr};
 use swc_core::plugin::{plugin_transform, proxies::TransformPluginProgramMetadata};
 use swc_core::{
     atoms::Atom,
@@ -16,6 +16,7 @@ use swc_core::{
         visit::{as_folder, FoldWith, VisitMut, VisitMutWith},
     },
 };
+use swc_ecma_parser::{Syntax, TsSyntax};
 
 #[derive(Default)]
 pub struct TransformVisitor {
@@ -49,6 +50,7 @@ impl TransformVisitor {
                                             self.find_stopped = true;
                                         } else {
                                             if self.find_stopped {
+                                                self.find_stopped = false;
                                                 expr.obj = self.take_static_expr()
                                             } else {
                                                 self.used_apis.insert(sym.to_string());
@@ -97,7 +99,6 @@ impl TransformVisitor {
     fn update_call(&mut self, node: &mut Box<swc_core::ecma::ast::Expr>) {
         if self.static_expr.is_some() {
             assert_eq!(self.find_stopped, true, "must ends with .value()");
-            self.find_stopped = true;
             *node = self.take_static_expr();
         }
     }
@@ -192,6 +193,16 @@ impl VisitMut for TransformVisitor {
         if node.expr.is_call() {
             self.find_static_lodash_call(node.expr.as_mut_call().unwrap());
             self.update_call(&mut node.expr);
+        }
+        node.visit_mut_children_with(self);
+    }
+
+    fn visit_mut_jsx_expr_container(&mut self, node: &mut swc_core::ecma::ast::JSXExprContainer) {
+        if let JSXExpr::Expr(expr) = &mut node.expr {
+            if expr.is_call() {
+                self.find_static_lodash_call(expr.as_mut_call().unwrap());
+                self.update_call(expr);
+            }
         }
         node.visit_mut_children_with(self);
     }
@@ -298,20 +309,25 @@ pub fn process_transform(program: Program, _metadata: TransformPluginProgramMeta
 // the Visitor's behavior, instead of trying to run `process_transform` with mocks
 // unless explicitly required to do so.
 test_inline!(
-    Default::default(),
+    Syntax::Typescript(TsSyntax {
+        tsx: true,
+        ..Default::default()
+    }),
     |_| as_folder(TransformVisitor::default()),
     boo,
     // Input codes
     r#"
     import _ from "lodash";
     var a = [_([]).filter((i) => _.isFinite(i.label)).mapValues((i) => i.key).value()]
-    _.isNil
+    _.isNil;
+    const a = <>{_([]).map((i) => i.label).value()}</>
     "#,
     // Output codes after transformed with plugin
-    r#"import { filter, isFinite, isNil, mapValues } from "lodash-es";
+    r#"import { filter, isFinite, isNil, map, mapValues } from "lodash-es";
     var a = [
         mapValues(filter([], (i)=>isFinite(i.label)), (i)=>i.key)
     ]
     isNil
+    const a = <>{map([], (i)=>i.label)}</>;
     "#
 );
