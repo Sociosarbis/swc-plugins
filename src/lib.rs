@@ -31,7 +31,6 @@ static VALUE_PROP: &'static str = "value";
 
 impl TransformVisitor {
     fn take_static_expr(&mut self) -> Box<Expr> {
-        self.find_stopped = false;
         self.static_expr.take().unwrap()
     }
 
@@ -98,6 +97,7 @@ impl TransformVisitor {
     fn update_call(&mut self, node: &mut Box<swc_core::ecma::ast::Expr>) {
         if self.static_expr.is_some() {
             assert_eq!(self.find_stopped, true, "must ends with .value()");
+            self.find_stopped = true;
             *node = self.take_static_expr();
         }
     }
@@ -129,7 +129,10 @@ impl VisitMut for TransformVisitor {
                                     self.lodash_name = local.sym.to_string();
                                     true
                                 }
-                                _ => false,
+                                ImportSpecifier::Named(ImportNamedSpecifier { local, .. }) => {
+                                    self.used_apis.insert(local.sym.to_string());
+                                    false
+                                }
                             });
                         }
                         return Some(m.as_module_decl().unwrap().as_import().unwrap());
@@ -199,15 +202,6 @@ impl VisitMut for TransformVisitor {
                 match &mut call_expr.callee {
                     Callee::Expr(expr) => match expr.as_mut() {
                         Expr::Member(expr) => match expr.obj.as_mut() {
-                            Expr::Ident(ident) if ident.sym == self.lodash_name => {
-                                if let MemberProp::Ident(IdentName { sym, span }) = &expr.prop {
-                                    self.used_apis.insert(sym.to_string());
-                                    call_expr.callee = Callee::Expr(Box::new(Expr::Ident(
-                                        Ident::new_no_ctxt(sym.clone(), *span),
-                                    )));
-                                    return;
-                                }
-                            }
                             Expr::Call(inner_call_expr) => {
                                 if inner_call_expr.callee.is_expr() {
                                     self.find_static_lodash_call(inner_call_expr);
@@ -263,6 +257,16 @@ impl VisitMut for TransformVisitor {
                     self.update_call(&mut assgin_expr.right);
                 }
             }
+            Expr::Member(mem_expr) => match mem_expr.obj.as_mut() {
+                Expr::Ident(ident) if ident.sym == self.lodash_name => {
+                    if let MemberProp::Ident(IdentName { sym, span }) = &mem_expr.prop {
+                        self.used_apis.insert(sym.to_string());
+                        *node = Expr::Ident(Ident::new_no_ctxt(sym.clone(), *span));
+                        return;
+                    }
+                }
+                _ => {}
+            },
             _ => {}
         }
         node.visit_mut_children_with(self);
@@ -300,10 +304,14 @@ test_inline!(
     // Input codes
     r#"
     import _ from "lodash";
-    var a = [_([]).filter((i) => _.isFinite(i.label)).mapValues((i) => i.key).value()]"#,
+    var a = [_([]).filter((i) => _.isFinite(i.label)).mapValues((i) => i.key).value()]
+    _.isNil
+    "#,
     // Output codes after transformed with plugin
-    r#"import { filter, isFinite, mapValues } from "lodash-es";
+    r#"import { filter, isFinite, isNil, mapValues } from "lodash-es";
     var a = [
         mapValues(filter([], (i)=>isFinite(i.label)), (i)=>i.key)
-    ]"#
+    ]
+    isNil
+    "#
 );
