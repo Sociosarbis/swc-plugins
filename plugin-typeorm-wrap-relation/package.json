@@ -1,0 +1,14 @@
+{
+    "name": "plugin-typeorm-wrap-relation",
+    "version": "0.1.0",
+    "description": "",
+    "author": "",
+    "license": "ISC",
+    "keywords": ["swc-plugin"],
+    "main": "target/wasm32-wasi/release/plugin_typeorm_wrap_relation.wasm",
+    "scripts": {
+        "prepublishOnly": "cargo build-wasi --release"
+    },
+    "files": [],
+    "preferUnplugged": true
+}

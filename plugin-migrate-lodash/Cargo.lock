@@ -690,15 +690,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "plugin-typeorm-wrap-relation"
-version = "0.1.0"
-dependencies = [
- "serde",
- "swc_core",
- "swc_ecma_parser",
-]
-
-[[package]]
 name = "portable-atomic"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
